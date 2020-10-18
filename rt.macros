@@ -1,0 +1,1471 @@
+*******************************************************
+*						*
+* DYNAMO						*
+*						*
+* Apple II 8-bit runtime macros.			*
+* Copyright (C) 1989 Apple Computer.		*
+*						*
+* Written by Eric Soldan, Apple II DTS		*
+*						*
+*******************************************************
+
+* These macros are interfaces for the runtime routines associated with them.
+* The runtime routines handle up to 128 integer variables, and up to 256
+* strings.  The integer functions are simple add,sub,mul,div, and others.
+* These others include mass-initialization, min, max, print decimal, etc.
+* The string functions are most of what is available in AppleSoft, in
+* various forms.  There is also support for multi-dimension arrays.
+
+* The principle of the runtime routines is that the xreg holds a destination
+* variable number (for ints: 0-254, for strings: 0-255).  All runtimes preserve
+* the xreg, therefore, you can do multiple operations to a single variable
+* without having to reload the xreg.  The values that are used on the xreg
+* variable (the source data), is one of 3 forms for integers:
+*	1. 1-byte value
+*	2. 2-byte value
+*	3. 2-byte integer variable.
+* 1-byte values are placed in the acc.  2-byte values are placed in the acc,y
+* (acc=lo, y=hi).  2-byte integer variables have the variable number placed in
+* the yreg.  (The yreg is not preserved by the runtime routines.)
+* Once the source data is loaded (in acc, acc-y, or y), the proper call to the
+* runtime routines is made.  The 'proper' routine is based on the type of data
+* the source is.  (If the source is a variable, and we are adding, the macro
+* will call the addvar routine.)
+
+* Strings are also referenced by number.  There are 3 tables for strings:
+*	1. String length table.
+*	2. Max string length table.
+*	3. Pointer table.
+* So, each string takes up four bytes, plus however long the max string length
+* is.  Having the pointer allows the program to point into memory that was
+* never loaded or initialized.  This can save time loading the application from
+* disk.  The string routines will never overwrite the buffer space alloced for
+* them.  The string will be truncated.  So, you can append strings without
+* worry about clobbering memory.
+
+
+*****************************************************************
+*****************************************************************
+*****************************************************************
+
+
+* These macros are called by other macros in this file.
+
+	MACRO
+	acorm	&op
+	if	&substr(&op,1,1)='#' goto .imm
+	if	&substr(&op,1,1)<>'*' then
+	aerror	'non-variable parameter must be preceeded by a # or *'
+	mexit
+	endif
+	lda	&substr(&op,2,999)
+	mexit
+.imm	lda	#<&substr(&op,2,999)
+	mend
+
+	MACRO
+	xcorm	&op
+	if	&substr(&op,1,1)='#' goto .imm
+	if	&substr(&op,1,1)<>'*' then
+	aerror	'non-variable parameter must be preceeded by a # or *'
+	mexit
+	endif
+	ldx	&substr(&op,2,999)
+	mexit
+.imm	ldx	#<&substr(&op,2,999)
+	mend
+
+	MACRO
+	axcorm	&op
+	if	&substr(&op,1,1)='#' goto .imm
+	if	&substr(&op,1,1)<>'*' then
+	aerror	'non-variable parameter must be preceeded by a # or *'
+	mexit
+	endif
+	lda	&substr(&op,2,999)
+	ldx	&substr(&op,2,999)+1
+	mexit
+.imm	lda	#<&substr(&op,2,999)
+	ldx	#>&substr(&op,2,999)
+	mend
+
+	MACRO
+	ycorm	&op
+	if	&substr(&op,1,1)='#' goto .imm
+	if	&substr(&op,1,1)<>'*' then
+	aerror	'non-variable parameter must be preceeded by a # or *'
+	mexit
+	endif
+	ldy	&substr(&op,2,999)
+	mexit
+.imm	ldy	#<&substr(&op,2,999)
+	mend
+
+	MACRO
+	aycorm	&op
+	if	&substr(&op,1,1)='#' goto .imm
+	if	&substr(&op,1,1)<>'*' then
+	aerror	'non-variable parameter must be preceeded by a # or *'
+	mexit
+	endif
+	lda	&substr(&op,2,999)
+	ldy	&substr(&op,2,999)+1
+	mexit
+.imm	lda	#<&substr(&op,2,999)
+	ldy	#>&substr(&op,2,999)
+	mend
+
+
+*****************************************************************
+*****************************************************************
+*****************************************************************
+
+
+* This macro initializes everything necessary in the runtime and runtime
+* macros.  It initializes global macro variables and resets everything
+* in the runtime so the application can resume if the user presses a reset.
+	MACRO
+&lab	_rtreset
+&lab	jsr	rtreset
+	MEND
+
+
+***************************************
+
+
+* This macro is used to turn on the hi-bit for characters that are sent to rtcout.
+	MACRO
+&lab	_hibitchrs
+&lab	jsr	hibitchrs
+	MEND
+
+
+***************************************
+
+
+* This macro is used to turn off the hi-bit for characters that are sent to rtcout.
+	MACRO
+&lab	_lowbitchrs
+&lab	jsr	lowbitchrs
+	MEND
+
+
+***************************************
+
+
+* This macro is used to make sure that characters sent to rtcout are used as-is.  There
+* will be no modification of the hi-bit.
+	MACRO
+&lab	_regchrs
+&lab	jsr	regchrs
+	MEND
+
+
+***************************************
+
+
+* This macro prints a character.  This character is either already in the acc
+* (no operand), or what is described by the operand.  The operand can either
+* be an absolute or a value in memory.
+* (acorm means load Acc with a Constant OR Memory value).
+	MACRO
+&lab	_rtcout	&op
+&lab
+	if	&op='' goto .jsr
+	acorm	&op
+.jsr	jsr	rtcout
+	MEND
+
+
+***************************************
+
+
+* This macro prints ascii data following the _write macro.  The write routine
+* works by using the return address as a pointer to the ascii data.  The ascii
+* data is terminated with a 0 (C-string style).  When the write routine
+* encounters a 0, it sets the return address so the when an rts is executed,
+* it returns to the code following the 0 terminator.  As many parameters as
+* are desired can be passed to this routine.  If the ascii data is more than
+* 1 line, end it with a comma,backslash to indicate line continuation.
+	MACRO
+&lab	_write
+&lab	
+	if	&syslist[1]='' then
+	aerror	'_write:  must have at least one parameter'
+	mexit
+	endif
+	jsr	write
+	lcla	&i,&n
+&i	seta	1
+&n	seta	&nbr(&syslist)
+.a	dc.b	&syslist[&i]
+&i	seta	&i+1
+	if	&i<=&n goto .a
+	dc.b	0
+	MEND
+
+
+***************************************
+
+
+* This macro prints a carriage return.
+	MACRO
+&lab	_writecr
+&lab	jsr	writecr
+	MEND
+
+
+***************************************
+
+
+* This macro prints a c string pointed to by the operand.
+	MACRO
+&lab	_wrcstr	&op
+&lab	aycorm	&op
+	jsr	wrcstr
+	MEND
+
+
+***************************************
+***************************************
+***************************************
+
+
+* This macro sets signed mode.  Printing decimal numbers is affected by this.
+	MACRO
+&lab	_signed
+&lab	jsr	signed
+	MEND
+
+
+***************************************
+
+
+* This macro sets unsigned mode.  Printing decimal numbers is affected by this.
+	MACRO
+&lab	_unsigned
+&lab	jsr	unsigned
+	MEND
+
+
+***************************************
+
+
+* This macro does a two's compliment on the variable.
+	MACRO
+&lab	_chngsgn
+&lab	jsr	chngsgn
+	MEND
+
+
+***************************************
+
+
+* This macro prints a 1-byte decimal value.  This value is either already in
+* the acc (no operand), or what is described by the operand.  The operand can
+* either be an absolute or a value in memory.
+	MACRO
+&lab	_decoutl	&op
+&lab	
+	if	&op='' goto .jsr
+	acorm	&op
+.jsr	jsr	decoutl
+	MEND
+
+
+***************************************
+
+
+* This macro prints a 2-byte decimal value.  This value is stored in a
+* variable.  The variable number is either already in the xreg (no operand),
+* or is determined by the operand.
+	MACRO
+&lab	_vdecout	&op
+&lab	
+	if	&op='' goto .jsr
+	ldx	#<&op
+.jsr	jsr	vdecout
+	MEND
+
+
+***************************************
+
+
+* This macro prints a 2-byte decimal value.  This value is either already in
+* the acc,y (no operand), or what is described by the operand.  The operand
+* can either be an absolute or a value in memory.
+	MACRO
+&lab	_decout	&op
+&lab	
+	if	&op='' goto .jsr
+	aycorm	&op
+.jsr	jsr	decout
+	MEND
+
+
+***************************************
+
+
+* This macro sets pad mode for hex.  The value is either already in the acc
+* (no operand), or what is described by the operand.  The operand can either
+* be an absolute or a value in memory.  Printing hex numbers is affected by
+* this.
+	MACRO
+&lab	_hexpad	&op
+&lab	
+	if	&op='' goto .jsr
+	acorm	&op
+.jsr	jsr	hexpad
+	MEND
+
+
+***************************************
+
+
+* This macro sets no pad mode for hex.  Printing hex numbers is affected by
+* this.
+	MACRO
+&lab	_hexnopad
+&lab	jsr	hexnopad
+	MEND
+
+
+***************************************
+
+
+* This macro prints a 1-byte hex value.  This value is either already in the
+* acc (no operand), or what is described by the operand.  The operand can
+* either be an absolute or a value in memory.
+	MACRO
+&lab	_hexoutl	&op
+&lab	
+	if	&op='' goto .jsr
+	acorm	&op
+.jsr	jsr	hexoutl
+	MEND
+
+
+***************************************
+
+
+* This macro prints a 2-byte hex value.  This value is stored in a variable.
+* The variable number is either already in the xreg (no operand), or is
+* determined by the operand.
+	MACRO
+&lab	_vhexout	&op
+&lab	
+	if	&op='' goto .jsr
+	ldx	#<&op
+.jsr	jsr	vhexout
+	MEND
+
+
+***************************************
+
+
+* This macro prints a 2-byte hex value.  This value is either already in the
+* acc,y (no operand), or what is described by the operand.  The operand can
+* either be an absolute or a value in memory.
+	MACRO
+&lab	_hexout	&op
+&lab	
+	if	&op='' goto .jsr
+	aycorm	&op
+.jsr	jsr	hexout
+	MEND
+
+
+***************************************
+
+
+* This macro adds a variable to the destination variable.  If there is no
+* op1, then the destination variable number is assumed to be in the xreg.
+* If there is no op2, then the source variable number is assumed to be in
+* the yreg.
+	MACRO
+&lab	_addvar	&op1,&op2
+&lab
+	if	&op1='' goto .a
+	ldx	#<&op1
+.a	if	&op2='' goto .jsr
+	ldy	#<&op2
+.jsr	jsr	addvar
+	mend
+
+
+***************************************
+
+
+* This macro adds a 1-byte value to the destination variable.  If there is
+* no op1, then the destination variable number is assumed to be in the xreg.
+* If there is no op2, then the value is assumed to be in the acc.
+	MACRO
+&lab	_addl	&op1,&op2
+&lab
+	if	&op1='' goto .a
+	ldx	#<&op1
+.a	if	&op2='' goto .jsr
+	acorm	&op2
+.jsr	jsr	addconl
+	mend
+
+
+***************************************
+
+
+* This macro adds a 2-byte value to the destination variable.  If there is
+* no op1, then the destination variable number is assumed to be in the xreg.
+* If there is no op2, then the value is assumed to be in acc,y.  aycorm works
+* like acorm, except for both the acc and yreg.
+	MACRO
+&lab	_add	&op1,&op2
+&lab
+	if	&op1='' goto .a
+	ldx	#<&op1
+.a	if	&op2='' goto .jsr
+	aycorm	&op2
+.jsr	jsr	addcon
+	mend
+
+
+***************************************
+
+
+* This macro subtracts a variable from the destination variable.  If there is
+* no op1, then the destination variable number is assumed to be in the xreg.
+* If there is no op2, then the source variable number is assumed to be in
+* the yreg.
+	MACRO
+&lab	_subvar	&op1,&op2
+&lab
+	if	&op1='' goto .a
+	ldx	#<&op1
+.a	if	&op2='' goto .jsr
+	ldy	#<&op2
+.jsr	jsr	subvar
+	mend
+
+
+***************************************
+
+
+* This macro subtracts a 1-byte value from the destination variable.  If there
+* is no op1, then the destination variable number is assumed to be in the xreg.
+* If there is no op2, then the value is assumed to be in the acc.
+	MACRO
+&lab	_subl	&op1,&op2
+&lab
+	if	&op1='' goto .a
+	ldx	#<&op1
+.a	if	&op2='' goto .jsr
+	acorm	&op2
+.jsr	jsr	subconl
+	mend
+
+
+***************************************
+
+
+* This macro subtracts a 2-byte value from the destination variable.  If there
+* is no op1, then the destination variable number is assumed to be in the xreg.
+* If there is no op2, then the value is assumed to be in acc,y.  aycorm works
+* like acorm, except for both the acc and yreg.
+	MACRO
+&lab	_sub	&op1,&op2
+&lab
+	if	&op1='' goto .a
+	ldx	#<&op1
+.a	if	&op2='' goto .jsr
+	aycorm	&op2
+.jsr	jsr	subcon
+	mend
+
+
+***************************************
+
+
+* This macro multiplies the destination variable by a variable.  If there is
+* no op1, then the destination variable number is assumed to be in the xreg.
+* If there is no op2, then the source variable number is assumed to be in
+* the yreg.
+	MACRO
+&lab	_mulvar	&op1,&op2
+&lab
+	if	&op1='' goto .a
+	ldx	#<&op1
+.a	if	&op2='' goto .jsr
+	ldy	#<&op2
+.jsr	jsr	mulvar
+	mend
+
+
+***************************************
+
+
+* This macro multiplies the destination variable by a 1-byte value.  If there
+* is no op1, then the destination variable number is assumed to be in the xreg.
+* If there is no op2, then the value is assumed to be in the acc.
+	MACRO
+&lab	_mull	&op1,&op2
+&lab
+	if	&op1='' goto .a
+	ldx	#<&op1
+.a	if	&op2='' goto .jsr
+	acorm	&op2
+.jsr	jsr	mulconl
+	mend
+
+
+***************************************
+
+
+* This macro multiplies the destination variable by a 2-byte value.  If there
+* is no op1, then the destination variable number is assumed to be in the xreg.
+* If there is no op2, then the value is assumed to be in acc,y.  aycorm works
+* like acorm, except for both the acc and yreg.
+	MACRO
+&lab	_mul	&op1,&op2
+&lab
+	if	&op1='' goto .a
+	ldx	#<&op1
+.a	if	&op2='' goto .jsr
+	aycorm	&op2
+.jsr	jsr	mulcon
+	mend
+
+
+***************************************
+
+
+* This macro divides the destination variable by a variable.  If there is
+* no op1, then the destination variable number is assumed to be in the xreg.
+* If there is no op2, then the source variable number is assumed to be in
+* the yreg.  The remainder from the divide is in the acc,y.
+	MACRO
+&lab	_divvar	&op1,&op2
+&lab
+	if	&op1='' goto .a
+	ldx	#<&op1
+.a	if	&op2='' goto .jsr
+	ldy	#<&op2
+.jsr	jsr	divvar
+	mend
+
+
+***************************************
+
+
+* This macro divides the destination variable by a 1-byte value.  If there
+* is no op1, then the destination variable number is assumed to be in the xreg.
+* If there is no op2, then the value is assumed to be in the acc.  The
+* remainder from the divide is in the acc,y.
+	MACRO
+&lab	_divl	&op1,&op2
+&lab
+	if	&op1='' goto .a
+	ldx	#<&op1
+.a	if	&op2='' goto .jsr
+	acorm	&op2
+.jsr	jsr	divconl
+	mend
+
+
+***************************************
+
+
+* This macro divides the destination variable by a 2-byte value.  If there
+* is no op1, then the destination variable number is assumed to be in the xreg.
+* If there is no op2, then the value is assumed to be in acc,y.  aycorm works
+* like acorm, except for both the acc and yreg.  The remainder from the divide
+* is in the acc,y.
+	MACRO
+&lab	_div	&op1,&op2
+&lab
+	if	&op1='' goto .a
+	ldx	#<&op1
+.a	if	&op2='' goto .jsr
+	aycorm	&op2
+.jsr	jsr	divcon
+	mend
+
+
+***************************************
+
+
+* This macro sets the current variable.  The current variable is defined by
+* a number in the xreg.  All runtime functions preserve the xreg, so multiple
+* operations can be done to the same variable without having to reload the xreg
+* with the variable number.
+	MACRO
+&lab	_var	&op
+&lab	ldx	#<&op
+	MEND
+
+
+***************************************
+
+
+* This macro sets a variable to 0.  If there is no op1, then the destination
+* variable number is assumed to be in the xreg.
+	MACRO
+&lab	_set0	&op
+&lab	
+	if	&op='' goto .jsr
+	ldx	#<&op
+.jsr	jsr	setzero
+	MEND
+
+
+***************************************
+
+
+* This macro sets a variable to another variable.  If there is no op1, then the
+* destination variable number is assumed to be in the xreg.  If there is no
+* op2, then the source variable number is assumed to be in the yreg.
+	MACRO
+&lab	_varcpy	&op1,&op2
+&lab	
+	if	&op1='' goto .a
+	ldx	#<&op1
+.a	if	&op2='' goto .jsr
+	ldy	#<&op2
+.jsr	jsr	seteq
+	mend
+
+
+***************************************
+
+
+* This macro sets a variable to a 1-byte value.  If there is no op1, then the
+* destination variable number is assumed to be in the xreg.  If there is no
+* op2, then the value is assumed to be in the acc.
+	MACRO
+&lab	_setl	&op1,&op2
+&lab	
+	if	&op1='' goto .a
+	ldx	#<&op1
+.a	if	&op2='' goto .jsr
+	acorm	&op2
+.jsr	jsr	setconl
+	mend
+
+
+***************************************
+
+
+* This macro sets a variable to a 2-byte value.  If there is no op1, then the
+* destination variable number is assumed to be in the xreg.  If there is no
+* op2, then the value is assumed to be in acc,y.
+	MACRO
+&lab	_set	&op1,&op2
+&lab	
+	if	&op1='' goto .a
+	ldx	#<&op1
+.a	if	&op2='' goto .jsr
+	aycorm	&op2
+.jsr	jsr	setcon
+	mend
+
+
+***************************************
+
+
+* This macro is used to set a bunch of variables to constant values.
+* There must be a non-zero even number of parameters.  The odd parameters
+* are the variables, and the even parameters are the constant values for
+* the preceeding parameter.  The setvars routine uses the return address
+* as a pointer to the data (just like the write routine).  It simply
+* sets the designated variable to the designated constant until it
+* encounters a 255 as a variable value.  A 255 is reserved for this
+* purpose.  This macro places a 255 at the end of the data list
+* automatically.
+	MACRO
+&lab	_setvars
+&lab	
+	if	&syslist[2]='' then
+	aerror	'_setvars:  must have at least two parameters'
+	mexit
+	endif
+	jsr	setvars
+	lcla	&i,&j,&n
+&i	seta	1
+&j	seta	2
+&n	seta	&nbr(&syslist)
+.a	if	&syslist[&j]='' then
+	aerror	'_setvars:  must have even number of parameters'
+	mexit
+	endif
+	dc.b	&syslist[&i]
+	if	&substr(&syslist[&j],1,1)<>'#' then
+	aerror	'_setvars:  variables can only be set to constants -- missing #'
+	mexit
+	endif
+	dc.w	&substr(&syslist[&j],2,999)
+&i	seta	&i+2
+&j	seta	&j+2
+	if	&i<=&n goto .a
+	dc.b	255
+	MEND
+
+
+***************************************
+
+
+* This macro swaps the two variables if the xreg variable is bigger than the
+* yreg variable.  If there is no op1, then the destination variable number is
+* assumed to be in the xreg.  If there is no op2, then the source variable
+* number is assumed to be in the yreg.
+	MACRO
+&lab	_minswap	&op1,&op2	
+&lab	
+	if	&op1='' goto .a
+	ldx	#<&op1
+.a	if	&op2='' goto .jsr
+	ldy	#<&op2
+.jsr	jsr	xlty
+	mend
+
+
+***************************************
+
+
+* This macro swaps the two variables if the xreg variable is smaller than the
+* yreg variable.  If there is no op1, then the destination variable number is
+* assumed to be in the xreg.  If there is no op2, then the source variable
+* number is assumed to be in the yreg.
+	MACRO
+&lab	_maxswap	&op1,&op2	
+&lab	
+	if	&op1='' goto .a
+	ldx	#<&op1
+.a	if	&op2='' goto .jsr
+	ldy	#<&op2
+.jsr	jsr	xgty
+	mend
+
+
+***************************************
+
+
+* This macro does a signed compare of two variables.  The equal status is true
+* if the variables are equal.  If the xreg variable is greater or equal, then
+* the carry is set.  If the xreg variable is smaller, then the carry is clear.
+* If there is no op1, then the variable number is assumed to be in the xreg.
+* If there is no op2, then the variable number is assumed to be in the yreg.
+	MACRO
+&lab	_vsgncmp	&op1,&op2	
+&lab
+	if	&op1='' goto .a
+	ldx	#<&op1
+.a	if	&op2='' goto .jsr
+	ldy	#<&op2
+.jsr	jsr	vifsgneq
+	mend
+
+
+***************************************
+
+
+* This macro does an unsigned compare of two variables.  The equal status is
+* true if the variables are equal.  If the xreg variable is greater or equal,
+* then the carry is set.  If the xreg variable is smaller, then the carry is
+* clear.  If there is no op1, then the variable number is assumed to be in the
+* xreg.  If there is no op2, then the variable number is assumed to be in the
+* yreg.
+	MACRO
+&lab	_vcmp	&op1,&op2	
+&lab
+	if	&op1='' goto .a
+	ldx	#<&op1
+.a	if	&op2='' goto .jsr
+	ldy	#<&op2
+.jsr	jsr	vifequal
+	mend
+
+
+***************************************
+
+
+* This macro works the same as _vsgncmp, except that it compares a variable
+* against a constant or value from memory at a specified location.
+	MACRO
+&lab	_sgncmp	&op1,&op2	
+&lab
+	if	&op1='' goto .a
+	ldx	#<&op1
+.a	if	&op2='' goto .jsr
+	aycorm	&op2
+.jsr	jsr	ifsgneq
+	mend
+
+
+***************************************
+
+
+* This macro works the same as _vcmp, except that it compares a variable
+* against a constant or value from memory at a specified location.
+	MACRO
+&lab	_cmp	&op1,&op2	
+&lab
+	if	&op1='' goto .a
+	ldx	#<&op1
+.a	if	&op2='' goto .jsr
+	aycorm	&op2
+.jsr	jsr	ifequal
+	mend
+
+
+***************************************
+***************************************
+***************************************
+
+
+* This macro is used to seed the random number generator.  If there is
+* no op1, then the random seed is assumed to be in the acc,y.
+	MACRO
+&lab	_rndseed	&op
+&lab	
+	if	&op='' goto .jsr
+	aycorm	&op
+.jsr	jsr	seedrandom
+	MEND
+
+
+***************************************
+
+
+* This macro is used to return a random number from 0 to op - 1.  If there is
+* no op1, then the random number limit is assumed to be in the acc,y.
+	MACRO
+&lab	_random	&op
+&lab	
+	if	&op='' goto .jsr
+	aycorm	&op
+.jsr	jsr	calcrandom
+	MEND
+
+
+***************************************
+***************************************
+***************************************
+
+
+* This macro takes the value of a string and returns it in the acc,y.
+* If there is no op1, then the string number is assumed to be in the xreg.
+	MACRO
+&lab	_strval	&op
+&lab
+	if	&op='' goto .jsr
+	ldx	#<&op
+.jsr	jsr	strval
+	mend
+
+
+***************************************
+
+
+* This macro takes the value of op1 string starting at op2 character and
+* returns it in the acc,y.  If there is no op1, then the string number is
+* assumed to be in the xreg.  If there is no op2, then the character number
+* is assumed to be in the yreg.
+	MACRO
+&lab	_midstrval &op1,&op2
+&lab
+	if	&op1='' goto .a
+	ldx	#<&op1
+.a	if	&op2='' goto .jsr
+	ycorm	&op2
+.jsr	jsr	midstrval
+	mend
+
+
+***************************************
+
+
+* This macro prints the entire string.  If there is no op1, then the string
+* number is assumed to be in the xreg.
+	MACRO
+&lab	_prstr	&op
+&lab	
+	if	&op='' goto .jsr
+	ldx	#<&op
+.jsr	jsr	prstr
+	MEND
+
+
+***************************************
+
+
+* This macro prints op1 string starting at the first character for op2
+* characters.  If there is no op1, then the string number is assumed to be
+* in the xreg.  If there is no op2, then the number of characters is assumed
+* to be in the acc.
+	MACRO
+&lab	_prleftstr &op1,&op2
+&lab
+	if	&op1='' goto .a
+	ldx	#<&op1
+.a	if	&op2='' goto .jsr
+	acorm	&op2
+.jsr	jsr	prleftstr
+	mend
+
+
+***************************************
+
+
+* This macro prints op1 string starting at the op2 character for op3
+* characters.  If there is no op1, then the string number is assumed to be
+* in the xreg.  If there is no op2, then the character number is assumed to
+* be in the yreg.  If there is no op3, then the number of characters is
+* assumed to be in the acc.
+	MACRO
+&lab	_prmidstr &op1,&op2,&op3
+&lab
+	if	&op1='' goto .a
+	ldx	#<&op1
+.a	if	&op2='' goto .b
+	ycorm	&op2
+.b	if	&op3='' goto .jsr
+	acorm	&op3
+.jsr	jsr	prmidstr
+	mend
+
+
+***************************************
+
+
+* This macro copies op3 characters from op2 string to op1 string.  If there
+* is no op1, then the destination string number is assumed to be in the xreg.
+* If there is no op2, then the source string number is assumed to be in the
+* yreg.  If there is no op3, then the number of characters is assumed to be
+* in the acc.
+	MACRO
+&lab	_leftstrcpy &op1,&op2,&op3
+&lab	
+	if	&op1='' goto .a
+	ldx	#<&op1
+.a	if	&op2='' goto .b
+	ldy	#<&op2
+.b	if	&op3='' goto .jsr
+	acorm	&op3
+.jsr	jsr	leftstrcpy
+	mend
+
+
+***************************************
+
+
+* This macro copies op2 string to op1 string.  If there is no op1, then the
+* destination string number is assumed to be in the xreg.  If there is no op2,
+* then the source string number is assumed to be in the yreg.
+	MACRO
+&lab	_strcpy &op1,&op2
+&lab	
+	if	&op1='' goto .a
+	ldx	#<&op1
+.a	if	&op2='' goto .jsr
+	ldy	#<&op2
+.jsr	jsr	strcpy
+	mend
+
+
+***************************************
+
+
+* This macro copies op4 characters, starting at op3 character from op2 string
+* to op1 string.  If there is no op1, then the destination string number is
+* assumed to be in the xreg.  If there is no op2, then the source string number
+* is assumed to be in the yreg.  If there is no op3, then the character number
+* is assumed to be in the acc.  If there is no op4, then all characters to the
+* end of the source string will be copied to the destination string.  The op4
+* case is the only case where the assumed value is a particular value (#255),
+* instead of what is in a register.  This is the case because there are only
+* three registers.
+	MACRO
+&lab	_midstrcpy &op1,&op2,&op3,&op4
+&lab
+	if	&op4='' goto .b
+	if	&op3<>'' goto .a
+	pha
+.a
+	acorm	&op4
+	sta	numtocopy
+	if	&op3<>'' goto .b
+	pla
+.b	if	&op1='' goto .c
+	ldx	#<&op1
+.c	if	&op2='' goto .d
+	ldy	#<&op2
+.d	if	&op3='' goto .jsr
+	acorm	&op3
+.jsr	jsr	midstrcpy
+	mend
+
+
+***************************************
+
+
+* This macro concatenates op3 characters of op2 string onto op1 string.  If
+* there is no op1, then the destination string number is assumed to be in the
+* xreg.  If there is no op2, then the source string number is assumed to be in
+* the yreg.  If there is no op3, then the number of characters is assumed to
+* be in the acc.
+	MACRO
+&lab	_leftstrcat &op1,&op2,&op3
+&lab	
+	if	&op1='' goto .a
+	ldx	#<&op1
+.a	if	&op2='' goto .b
+	ldy	#<&op2
+.b	if	&op3='' goto .jsr
+	acorm	&op3
+.jsr	jsr	leftstrcat
+	mend
+
+
+***************************************
+
+
+* This macro concatenates op2 string onto op1 string.  If there is no op1,
+* then the destination string number is assumed to be in the xreg.  If there
+* is no op2, then the source string number is assumed to be in the yreg.
+	MACRO
+&lab	_strcat &op1,&op2
+&lab	
+	if	&op1='' goto .a
+	ldx	#<&op1
+.a	if	&op2='' goto .jsr
+	ldy	#<&op2
+.jsr	jsr	strcat
+	mend
+
+
+***************************************
+
+
+* This macro concatenates op4 characters starting at op3 character from op2
+* string onto op1 string.  If there is no op1, then the destination string
+* number is assumed to be in the xreg.  If there is no op2, then the source
+* string number is assumed to be in the yreg.  If there is no op3, then the
+* character number is assumed to be in the acc.  If there is no op4, then all
+* characters to the end of the source string will be concatenated to the
+* destination string.  The op4 case is the only case where the assumed value
+* is a particular value (#255), instead of what is in a register.  This is
+* the case because there are only three registers.
+	MACRO
+&lab	_midstrcat &op1,&op2,&op3,&op4
+&lab
+	if	&op4='' goto .a
+	pha
+	acorm	&op4
+	sta	numtocopy
+	pla
+.a	if	&op1='' goto .b
+	ldx	#<&op1
+.b	if	&op2='' goto .c
+	ldy	#<&op2
+.c	if	&op3='' goto .jsr
+	acorm	&op3
+.jsr	jsr	midstrcat
+	mend
+
+
+***************************************
+
+
+* This macro is used to take some literal string data and place it into
+* a string.  It works very much like the write routine, except that it
+* copies the characters into a string instead of printing them.  Operand
+* 1 is the string variable, if there is one designated.  If there is not
+* one designated, then the x-reg is assumed to already hold it.  There
+* then must be a second parameter.  This parameter would be string data.
+* There may be other parameters, which would also hold string data.
+* When all data parameters are used by this macro, the macro then places
+* a 0 terminator to indicate the end of the literal data.
+	MACRO
+&lab	_litstr
+&lab	
+	if	&syslist[2]='' then
+	aerror	'_litstr:  must have a second parameter'
+	mexit
+	endif
+	if	&syslist[1]='' goto .jsr
+	ldx	#<&syslist[1]
+.jsr	jsr	litstr
+	lcla	&i,&n
+&i	seta	2
+&n	seta	&nbr(&syslist)
+.a	dc.b	&syslist[&i]
+&i	seta	&i+1
+	if	&i<=&n goto .a
+	dc.b	0
+	MEND
+
+
+***************************************
+
+
+* This macro returns the op2th character of op1 string.  If there is no op1,
+* then the destination string number is assumed to be in the xreg.  If there
+* is no op2, then the character number is assumed to be in the acc.
+	MACRO
+&lab	_strchr &op1,&op2
+&lab	
+	if	&op1='' goto .a
+	ldx	#<&op1
+.a	if	&op2='' goto .jsr
+	acorm	&op2
+.jsr	jsr	strchr
+	mend
+
+
+***************************************
+
+
+* This macro returns the physical location of op1 string in memory.  The
+* string location is returned in acc,y.If there is no op1, then the
+* destination string number is assumed to be in the xreg.
+	MACRO
+&lab	_strloc &op1
+&lab	
+	if	&op1='' goto .jsr
+	ldx	#<&op1
+.jsr	jsr	strloc
+	mend
+
+
+***************************************
+
+
+	MACRO
+&lab	_cstr
+&lab	
+	if	&syslist[1]='' then
+	aerror	'_write:  must have at least one parameter'
+	mexit
+	endif
+	lcla	&i,&n
+&i	seta	1
+&n	seta	&nbr(&syslist)
+.a	dc.b	&syslist[&i]
+&i	seta	&i+1
+	if	&i<=&n goto .a
+	dc.b	0
+	MEND
+
+
+***************************************
+***************************************
+***************************************
+
+
+* This macro sets the read data pointer.  If there is no op, then the address
+* for reading data is assumed to be in the acc,y.
+	MACRO
+&lab	_restore	&op
+&lab
+	if	&op='' goto .jsr
+	aycorm	&op
+.jsr	jsr	restore
+	MEND
+
+
+***************************************
+
+
+* This macro reads an int from the current data pointer and advances the
+* pointer by two bytes.  If there is no op1, then the destination variable
+* number is assumed to be in the xreg.
+	MACRO
+&lab	_readint	&op
+&lab	
+	if	&op='' goto .jsr
+	ldx	#<&op
+.jsr	jsr	readint
+	MEND
+
+
+***************************************
+
+
+* This macro reads string data into the designated string until the
+* end-of-string character is encountered.  The data pointer is then set to
+* point after this end-of-string character.  If there is no op1, then the
+* destination string number is assumed to be in the xreg.
+	MACRO
+&lab	_readstr	&op
+&lab	
+	if	&op='' goto .jsr
+	ldx	#<&op
+.jsr	jsr	readstr
+	MEND
+
+
+***************************************
+
+
+* This macro is used to set the end-of-string character for _readstr.  If
+* there is no op1, then the _readstr ending character is assumed to be in
+* the acc.
+	MACRO
+&lab	_readend	&op
+&lab	
+	if	&op='' goto .jsr
+	acorm	&op
+.jsr	jsr	readend
+	MEND
+
+
+***************************************
+***************************************
+***************************************
+
+
+* This macro is used to define some memory as an array of up to
+* 4 dimensions.  The first parameter is the location of the
+* array, or where the location of the array is stored.  The second
+* parameter is the size of the elements, (b)yte or (w)ord.  The 
+* third parameter is the first dimension.  The macro and routines
+* actually ignore this dimension, since it would only be used for
+* range checking anyway.  The fourth through sixth parameters are
+* optional.  The more parameters, the more dimensions in the array.
+	MACRO
+&lab	_array	&loc,&elesize,&op1,&op2,&op3,&op4
+&lab	
+	if	&loc='' goto .a
+	aycorm	&loc
+.a	jsr	arraybase
+	if	&op4='' goto .b
+	if	&substr(&op4,1,1)<>'#' then
+.err	aerror	'_array:  dimensions must be constants --  parameter must be preceeded by a #'
+	mexit
+	endif
+.b	if	&op3='' goto .c
+	if	&substr(&op3,1,1)<>'#' goto .err
+.c	if	&op2='' goto .d
+	if	&substr(&op2,1,1)<>'#' goto .err
+.d	if	&op1='' goto .e
+	if	&substr(&op1,1,1)<>'#' goto .err
+.e	if	&substr(&elesize,1,1)='b' goto .byte
+	if	&substr(&elesize,1,1)='B' goto .byte
+	if	&substr(&elesize,1,1)='w' goto .word
+	if	&substr(&elesize,1,1)='W' goto .word
+	aerror	'_array:  element size can only be byte or word (b,w)'
+.word	if	&op4>'' goto .w4
+	if	&op3>'' goto .w3
+	if	&op2>'' goto .w2
+	mexit
+.w2	lda	#<&substr(&op2,2,999)*2
+	ldy	#>&substr(&op2,2,999)*2
+	jsr	dim1size
+	mexit
+.w3	lda	#<&substr(&op2,2,999)*&substr(&op3,2,999)*2
+	ldy	#>&substr(&op2,2,999)*&substr(&op3,2,999)*2
+	jsr	dim1size
+	lda	#<&substr(&op3,2,999)*2
+	ldy	#>&substr(&op3,2,999)*2
+	jsr	dim2size
+	mexit
+.w4	lda	#<&substr(&op2,2,999)*&substr(&op3,2,999)*&substr(&op4,2,999)*2
+	ldy	#>&substr(&op2,2,999)*&substr(&op3,2,999)*&substr(&op4,2,999)*2
+	jsr	dim1size
+	lda	#<&substr(&op3,2,999)*&substr(&op4,2,999)*2
+	ldy	#>&substr(&op3,2,999)*&substr(&op4,2,999)*2
+	jsr	dim2size
+	lda	#<&substr(&op4,2,999)*2
+	ldy	#>&substr(&op4,2,999)*2
+	jsr	dim3size
+	mexit
+.byte	if	&op4>'' goto .b4
+	if	&op3>'' goto .b3
+	if	&op2>'' goto .b2
+.b2	lda	#<&substr(&op2,2,999)
+	ldy	#>&substr(&op2,2,999)
+	jsr	dim1size
+	mexit
+.b3	lda	#<&substr(&op2,2,999)*&substr(&op3,2,999)
+	ldy	#>&substr(&op2,2,999)*&substr(&op3,2,999)
+	jsr	dim1size
+	lda	#<&substr(&op3,2,999)
+	ldy	#>&substr(&op3,2,999)
+	jsr	dim2size
+	mexit
+.b4	lda	#<&substr(&op2,2,999)*&substr(&op3,2,999)*&substr(&op4,2,999)
+	ldy	#>&substr(&op2,2,999)*&substr(&op3,2,999)*&substr(&op4,2,999)
+	jsr	dim1size
+	lda	#<&substr(&op3,2,999)*&substr(&op4,2,999)
+	ldy	#>&substr(&op3,2,999)*&substr(&op4,2,999)
+	jsr	dim2size
+	lda	#<&substr(&op4,2,999)
+	ldy	#>&substr(&op4,2,999)
+	jsr	dim3size
+	mend
+
+
+***************************************
+
+
+* This macro is used to index into the current array (defined by _array).
+* The whole goal of the array handling is to index down to the row level.
+* Once at the row level, you use the right-most subscript to index into
+* that row.  This makes working on a row very fast, since all subscripts
+* are not involved each time.  So, _index would be used for all subscripts
+* except for the last subscript.  The parameter can either be a constant,
+* (preceeded with a #) or can be a location in ram that holds the index
+* (preceeded with an *).
+	MACRO
+&lab	_index	&op1,&op2,&op3
+&lab
+	if	&op1='' goto .a
+	aycorm	&op1
+	jsr	arrayindx1
+.a	if	&op2='' goto .b
+	aycorm	&op2
+	jsr	arrayindx2
+.b	if	&op3='' goto .c
+	aycorm	&op3
+	jsr	arrayindx3
+.c	mend
+
+
+***************************************
+
+
+* This macro works the same as _index, except that the index is stored
+* in the variable indicated.
+	MACRO
+&lab	_vindex	&op1,&op2,&op3
+&lab
+	if	&op1='' goto .a
+	ldy	#<&op1
+	jsr	varyindx1
+.a	if	&op2='' goto .b
+	ldy	#<&op2
+	jsr	varyindx2
+.b	if	&op3='' goto .c
+	ldy	#<&op3
+	jsr	varyindx3
+.c	mend
+
+
+***************************************
+
+
+* This macro gets a byte from the working row of the current array.
+* The final index parameter is used to index into this row.
+	MACRO
+&lab	_getb	&op1,&op2
+&lab
+	if	&op1='' goto .a
+	ldx	#<&op1
+.a	if	&op2='' goto .jsr
+	aycorm	&op2
+.jsr	jsr	getelel
+	mend
+
+
+***************************************
+
+
+* This macro is works the same as _getb, except that the index is
+* stored in a variable.
+	MACRO
+&lab	_vgetb	&op1,&op2
+&lab
+	if	&op1='' goto .a
+	ldx	#<&op1
+.a	if	&op2='' goto .jsr
+	ldy	#<&op2
+.jsr	jsr	vgetelel
+	mend
+
+
+***************************************
+
+
+* This macro is the same as _getb, except that it gets a word.
+	MACRO
+&lab	_getw	&op1,&op2
+&lab
+	if	&op1='' goto .a
+	ldx	#<&op1
+.a	if	&op2='' goto .jsr
+	aycorm	&op2
+.jsr	jsr	getele
+	mend
+
+
+***************************************
+
+
+* This macro is the same as _vgetb, except that it gets a word.
+	MACRO
+&lab	_vgetw	&op1,&op2
+&lab
+	if	&op1='' goto .a
+	ldx	#<&op1
+.a	if	&op2='' goto .jsr
+	ldy	#<&op2
+.jsr	jsr	vgetele
+	mend
+
+
+***************************************
+
+
+* This macro is the same as _getb, except that it stores a byte.
+	MACRO
+&lab	_putb	&op1,&op2
+&lab
+	if	&op1='' goto .a
+	ldx	#<&op1
+.a	if	&op2='' goto .jsr
+	aycorm	&op2
+.jsr	jsr	putelel
+	mend
+
+
+***************************************
+
+
+* This macro is the same as _vgetb, except that it stores a byte.
+	MACRO
+&lab	_vputb	&op1,&op2
+&lab
+	if	&op1='' goto .a
+	ldx	#<&op1
+.a	if	&op2='' goto .jsr
+	ldy	#<&op2
+.jsr	jsr	vputelel
+	mend
+
+
+***************************************
+
+
+* This macro is the same as _getw, except that it stores a word.
+	MACRO
+&lab	_putw	&op1,&op2
+&lab
+	if	&op1='' goto .a
+	ldx	#<&op1
+.a	if	&op2='' goto .jsr
+	aycorm	&op2
+.jsr	jsr	putele
+	mend
+
+
+***************************************
+
+
+* This macro is the same as _vgetw, except that it stores a word.
+	MACRO
+&lab	_vputw	&op1,&op2
+&lab
+	if	&op1='' goto .a
+	ldx	#<&op1
+.a	if	&op2='' goto .jsr
+	ldy	#<&op2
+.jsr	jsr	vputele
+	mend

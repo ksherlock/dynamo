@@ -1,0 +1,61 @@
+*******************************************************
+*						*
+* DYNAMO						*
+*						*
+* Apple II 8-bit runtime system equates.		*
+* Copyright (C) 1989 Apple Computer.		*
+*						*
+* Written by Eric Soldan, Apple II DTS		*
+*						*
+*******************************************************
+
+		case	on
+		longi	off
+		longa	off
+
+hibyte		equ	1
+
+**************************
+
+ch		equ	$24
+cv		equ	$25
+rndl		equ	$4E
+rndh		equ	$4F
+
+mli		equ	$BF00
+
+vtabz		equ	$FC24
+home		equ	$FC58
+rdkey		equ	$FD0C
+cout		equ	$FDED
+idRoutine	equ	$FE1F
+
+pri		equ	0
+aux		equ	1
+off		equ	0
+on		equ	1
+STORE80		equ	$C000
+RAMWRT		equ	$C004
+COL80		equ	$C00C
+sccareg		equ	$C039
+inten		equ	$C041
+clrvblint	equ	$C047
+TEXT		equ	$C050
+MIXED		equ	$C052
+HIRES		equ	$C056
+DHIRES		equ	$C05E
+openApple	equ	$C061
+solidApple	equ	$C062
+statereg		equ	$C068
+
+KBRD		equ	$C000
+KBRDSTRB		equ	$C010
+
+wndwth		equ	$21
+cswl		equ	$36
+cswh		equ	$37
+kswl		equ	$38
+kswh		equ	$39
+
+aptr		equ	$60		;& $61
+

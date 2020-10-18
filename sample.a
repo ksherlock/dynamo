@@ -1,0 +1,372 @@
+*******************************************************
+*						*
+* Apple II 8-bit runtime sample exerciser.		*
+* Copyright (C) 1989 Apple Computer.		*
+*						*
+* Written by Eric Soldan, Apple II DTS		*
+*						*
+*******************************************************
+
+		include	'sys.equ'
+		include	'app.config'
+		include	'rt.externs'
+		include	'rt.macros'
+
+*********************************************
+
+main		PROC
+		export	strlens, maxstrlens, strlocs
+
+		jmp	main0
+
+strlens		ds.b	numstrings
+maxstrlens	dc.b	maxstr1, maxstr2
+strlocs		dc.w	str1loc, str2loc
+
+main0		jsr	$C300		;Initialize 80-col screen.
+		_rtcout	#13
+		jsr	home
+
+main1		lda	#0		;Clear the variable space.
+		tax			;This application does not
+@clearvars	sta	vs,x		;need to variables to be
+		inx			;pre-cleared.
+		bne	@clearvars
+
+******************
+
+		_rtreset
+		_hibitchrs
+
+		_write	'8-bit sample application demonstrating ',\
+			'macros and runtime.',13,\
+			'Copyright (C) 1989 by Apple Computer.'
+
+		_signed
+		_write	13,13,13,13,'  Testing signed output:  '
+		_decout	#-1
+		_unsigned
+		_write	13,'Testing unsigned output:  '
+		_decout	#-1
+
+		_write	13,13,'  Testing 1-byte decimal output:  '
+		_decoutl	#-1
+		_write	13,'Testing variable decimal output:  '
+		_set	var1,#123
+		_vdecout
+
+		_write	13,13,'           hexpad default is to pad with 0''s:  '
+		_vhexout
+		_hexnopad
+		_write	13,'       Testing 2-byte hex output with no pad:  '
+		_hexout	#123
+		_hexpad	#32
+		_write	13,'Testing 2-byte hex output padded with spaces:  '
+		_hexout	#123
+
+
+		_hexpad	#'0'
+		_writecr
+		_write	13,'   Testing 1-byte hex output padded with 0''s:  '
+		_hexoutl	#15
+		_hexnopad
+		_write	13,'       Testing 1-byte hex output with no pad:  '
+		_hexoutl	#15
+		_hexpad	#32
+		_write	13,'Testing 1-byte hex output padded with spaces:  '
+		_hexoutl	#15
+		
+		jsr	nextPage
+
+		_write	'Testing _addvar:  1234+5678='
+		_set	var2,#5678
+		_set	var1,#1234
+		_addvar	,var2
+		_vdecout
+		_write	13,'  Testing _addl:  +123='
+		_addl	,#123
+		_vdecout
+		_write	13,'   Testing _add:  +456='
+		_add	,#456
+		_vdecout
+
+		_write	13,13,'Testing _subvar:  5678-1234='
+		_set	var2,#1234
+		_set	var1,#5678
+		_subvar	,var2
+		_vdecout
+		_write	13,'  Testing _subl:  -123='
+		_subl	,#123
+		_vdecout
+		_write	13,'   Testing _sub:  -456='
+		_sub	,#456
+		_vdecout
+
+		_write	13,13,'Testing _mulvar:  12*345='
+		_set	var2,#345
+		_set	var1,#12
+		_mulvar	,var2
+		_vdecout
+		_write	13,'  Testing _mull:  *6='
+		_mull	,#6
+		_vdecout
+		_write	13,'   Testing _mul:  *789='
+		_mul	,#789
+		_vdecout
+		_write	'   (Overflow -- loss of high-order bytes.)'
+
+		_write	13,13,'Testing _divvar:  65432/23='
+		_set	var2,#23
+		_set	var1,#65432
+		_divvar	,var2
+		_set	remainder
+		_vdecout	var1
+		_write	'  (Remainder='
+		_vdecout	remainder
+		_rtcout	#')'
+		_write	13,'  Testing _divl:  /34='
+		_divl	var1,#34
+		_set	remainder
+		_vdecout	var1
+		_write	'         (Remainder='
+		_vdecout	remainder
+		_rtcout	#')'
+		_write	13,'   Testing _div:  /321='
+		_div	var1,#321
+		_set	remainder
+		_vdecout	var1
+		_write	'         (Remainder='
+		_vdecout	remainder
+		_rtcout	#')'
+
+		jsr	nextPage
+
+		_set	var1,#345
+		_set0	var1
+		_write	'Testing _set0:  '
+		_vdecout
+		_set	var2,#2
+		_var	var1
+		_varcpy	,var2
+		_write	13,'Testing _var and _varcpy (2 means good):  '
+		_vdecout
+		_set	var1,#345
+		_setl	,#123
+		_write	13,'Testing _setl (123 means good):  '
+		_vdecout
+
+		_write	13,13,'Testing _setvars:  '
+		_setvars	var1,#123,var2,#456,var3,#789
+		_vdecout	var1
+		_rtcout	#','
+		_vdecout	var2
+		_rtcout	#','
+		_vdecout	var3
+
+		_write	13,13,'  Testing _maxswap (signed):  '
+		_set	var1,#-123
+		_signed
+		_maxswap	var1,var2
+		_vdecout
+		_rtcout	#','
+		_vdecout	var2
+		_write	13,'Testing _minswap (unsigned):  '
+		_unsigned
+		_minswap	var1,var2
+		_signed
+		_vdecout
+		_rtcout	#','
+		_vdecout	var2
+		_unsigned
+
+		_write	13,13,'Testing _vsgncmp:  -123<456?:  '
+		_setvars	var1,#-123,var2,#456
+		_vsgncmp	var1,var2
+		bcc	@a
+		_write	'no'
+		jmp	@b
+@a		_write	'yes'
+@b		_write	13,'   Testing _vcmp:  -123<456?:  '
+		_vcmp	var1,var2
+		bcc	@c
+		_write	'no'
+		jmp	@d
+@c		_write	'yes'
+@d		_write	13,' Testing _sgncmp:  -123<456?:  '
+		_sgncmp	var1,#456
+		bcc	@e
+		_write	'no'
+		jmp	@f
+@e		_write	'yes'
+@f		_write	13,'    Testing _cmp:  -123<456?:  '
+		_cmp	var1,#456
+		bcc	@g
+		_write	'no'
+		jmp	@h
+@g		_write	'yes'
+@h
+
+		_readend	#0
+		_restore	#strdata
+		_readstr	str1
+		_prstr
+		_readstr	str2
+		_strval
+		_decout
+
+		_readstr	str1
+		_prstr
+		_midstrval str2,#2
+		_decout
+
+		_rtcout	  #13
+		_readstr   str1
+		_prleftstr str1,#10
+		_prmidstr  str1,#10,#5
+		_prmidstr  str1,#15,#255
+
+		_rtcout     #13
+		_readstr    str1
+		_leftstrcpy str2,str1,#15
+		_prstr
+		_midstrcpy  ,str1,#15,#5
+		_prstr
+		_midstrcpy  ,str1,#20
+		_prstr
+
+		_rtcout	#13
+		_readstr	str1
+		_strcpy	str2,str1
+		_prstr
+
+		_rtcout     #13
+		_readstr    str2
+		_readstr    str1
+
+		_leftstrcat str2,str1,#10
+		_midstrcat  ,str1,#10,#5
+		_midstrcat  ,str1,#15
+		_prstr
+
+		_rtcout	#13
+		_readstr	str1
+		_readstr	str2
+
+		_strcat	str1,str2
+		_prstr
+
+		jsr	nextPage
+
+		_readstr	str1
+		ldy	#0
+@loop		cpy	strlens+str1
+		beq	@brkloop
+		tya
+		pha
+		_strchr
+		_rtcout
+		pla
+		tay
+		iny
+		bne	@loop
+@brkloop
+
+		_litstr	str1,13,'Testing _litstr.'
+		_prstr
+		_write	13,'Testing _strloc:  str1 is at $'
+		_strloc	str1
+		_hexout
+
+		_write	13,13,'Testing _rndseed:  value passed is:  $'
+		_hexnopad
+		_hexout	*rndl
+		_rndseed	*rndl
+		_write	13,13,'Testing _random (200 numbers from 0 to 99):',13,13
+		ldx	#10
+@loopx		stx	@tempx
+		ldy	#20
+@loopy		sty	@tempy
+		_random	#100		;This random generator can not generate
+		_decout			;a zero value.  This is okay, since you
+		lda	#','		;can't declare a limit in 2 bytes which
+		ldy	@tempy		;would give you this range.  (To get a
+		dey			;high-end value of 65535, you would have
+		bne	@i		;to have a limit of 65536.
+		lda	#13		;Adjustments for the algorithm not
+@i		_rtcout			;generating a 0 value have been made.
+		ldy	@tempy		;1 is subtracted from the value, thus
+		dey			;moving the problem value from 0 to 65535.
+		bne	@loopy		;Since there is a limit on the 65535 value
+		ldx	@tempx		;anyway, due to not being able to declare
+		dex			;a limit or 65536, this works rather well.
+		bne	@loopx
+
+		jsr	nextPage
+
+		_write	13,'Testing array handling.'
+		_write	13,'The array is 2x512x2x4 words.'
+
+		_array	#$4000,w,#2,#512,#2,#4
+
+		_index	#1,#379,#1
+		_set	var1,#1234
+		_putw	,#3
+
+		_index	,#73
+		_set	var1,#5678
+		_putw	,#4
+
+		_write	13,13,'array(1,379,1,3)='
+		_index	,#379,#1
+		_getw	var1,#3
+		_vdecout
+
+		_write	13,'array(1,73,0,4)='
+		_index	,#73
+		_getw	var1,#4
+		_vdecout
+
+		jsr	nextPage
+
+		jmp	main1
+@tempx		dc.b	0
+@tempy		dc.b	0
+
+
+strdata		_cstr	13,13,'Testing _readend, _restore, ',\
+			'_readstr, and _strval:  '
+		_cstr	'12345'
+		_cstr	13,'Testing _midstrval:  '
+		_cstr	'Testing _prleftstr and _prmidstr.'
+		_cstr	'Testing _leftstrcpy and _midstrcpy.'
+		_cstr	'Testing _strcpy.'
+		_cstr	0,'Testing _leftstrcat and _midstrcat.'
+		_cstr	'Testing '
+		_cstr	'_strcat.'
+		_cstr	13,'Testing _strchr.'
+
+
+nextPage		lda	#22
+		sta	cv
+		_write	13,'  <<< Press any key to go on (or ESC to quit). >>>'
+		bit	$C010
+@a		inc	rndl
+		bne	@b
+		inc	rndh
+@b		lda	$C000
+		bpl	@a
+		bit	$C010
+		cmp	#$9B
+		beq	@quit
+		jmp	home
+@quit		jsr	home
+		jsr	mli
+		dc.b	$65
+		dc.w	@quitlist
+@quitlist	dc.b	4
+		dc.w	0,0,0
+
+		endp
+
+		END
+

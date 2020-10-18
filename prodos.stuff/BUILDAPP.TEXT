@@ -1,0 +1,6 @@
+DUMMY						;The default script filename.
+0,$800,SAMPLE.BIN			;The buildapp application.
+$80,$800					;Starting address.
+$							;Display starting address in hex.
+$							;Display application size in hex.
+$FF,0,SAMPLE.SYSTEM			;Target filename, filetype, and auxtype.

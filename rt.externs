@@ -1,0 +1,34 @@
+*******************************************************
+*						*
+* DYNAMO						*
+*						*
+* Apple II 8-bit runtime entry points.		*
+* Copyright (C) 1989 Apple Computer.		*
+*						*
+*******************************************************
+
+		import	rtreset
+		import	rtcout, signed, unsigned, decoutl, vdecout, decout
+		import	hexpad, hexnopad, hexoutl, vhexout, hexout, write
+		import	writecr, mulconl, mulvar, mulcon, divconl, divvar
+		import	divcon, addvar, addcon, addconl, subvar, subcon
+		import	subconl, setconl, setcon, setzero, seteq, setvars
+		import	xgty, xlty, ifsgneq, ifequal, vifsgneq, vifequal
+		import	strval, midstrval
+		import	prstr, prleftstr, prmidstr, leftstrcpy, strcpy
+		import	midstrcpy, leftstrcat, strcat, midstrcat
+		import	strchr, strloc, restore, readint, readstr, readend
+		import	litstr, seedrandom, calcrandom
+
+		import	nextchr, numtocopy
+
+		import	arraybase, arrayloc1, arrayloc2, arrayloc3
+		import	dim1size, dim2size, dim3size
+		import	varyindx1, varyindx2, varyindx3
+		import	arrayindx1, arrayindx2, arrayindx3
+		import	vgetelel, vgetele, vputelel, vputele
+		import	getelel, getnextelel, getele, getnextele
+		import	putelel, putnextelel, putele, putnextele
+
+		import	wrcstr, chngsgn
+		import	hibitchrs, lowbitchrs, regchrs

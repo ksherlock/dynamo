@@ -1,0 +1,1438 @@
+*******************************************************
+*						*
+* DYNAMO						*
+*						*
+* Apple II 8-bit runtime library routines.		*
+* Copyright (C) 1989 Apple Computer.		*
+*						*
+* Written by Eric Soldan, Apple II DTS		*
+*						*
+*******************************************************
+
+		include	'sys.equ'
+		include	'app.config'
+
+vsl		equ	varstart
+vsh		equ	varstart+hibyte
+
+******************
+
+		export	rtreset
+rtreset		proc
+		export	numtocopy, chrhibiton, chrhibitoff
+		export	sign, readendchr, hexpadchr, padhex
+		ldy	#255
+		sty	numtocopy
+		sty	chrhibitoff
+		iny
+		sty	chrhibiton
+		sty	sign
+		sty	readendchr
+		lda	#'0'
+		sta	hexpadchr
+		lsr	padhex
+		rts
+numtocopy	dc.b	255		;Will be set back to 255 after
+					;every string copy or append.
+chrhibitoff	dc.b	$FF
+chrhibiton	dc.b	0
+sign		dc.b	0
+readendchr	dc.b	0
+hexpadchr	dc.b	'0'
+padhex		dc.b	0
+		endp
+
+***
+
+		export	hibitchrs
+hibitchrs	PROC
+
+		lda	#$80		;We don't need to set chrhibitoff
+		sta	chrhibiton	;because it will either be a $7F
+		rts			;or $FF, and in either case
+		endp			;chrhibiton will turn it on anyway.
+
+***
+
+		export	lowbitchrs
+lowbitchrs	PROC
+
+		asl	chrhibiton	;Was a $00 or $80, so this makes it $00.
+		lda	#$7F
+		sta	chrhibitoff
+		rts
+		endp
+
+***
+
+		export	regchrs
+regchrs		PROC
+
+		asl	chrhibiton
+		lda	#$FF
+		sta	chrhibitoff
+		rts
+		endp
+
+***
+
+		export	rtcout
+rtcout		proc
+
+		stx	@keepx
+		and	chrhibitoff
+		ora	chrhibiton
+		jsr	$FDED
+		ldx	@keepx
+		rts
+@keepx		dc.b	0
+		endp
+
+***
+
+		export	write
+write		proc
+		pla
+		sta	@getchr+1
+		pla
+		sta	@getchr+2
+		txa
+		pha
+@loop		inc	@getchr+1
+		bne	@getchr
+		inc	@getchr+2
+@getchr		lda	$2000		;Address modified.
+		beq	@exit
+		jsr	rtcout
+		jmp	@loop
+@exit		pla
+		tax
+		lda	@getchr+2
+		pha
+		lda	@getchr+1
+		pha
+		rts
+		endp
+
+***
+
+		export	writecr
+writecr		proc
+		txa
+		pha
+		lda	#13
+		jsr	rtcout
+		pla
+		tax
+		rts
+		endp
+
+***
+
+		export	wrcstr
+wrcstr		proc
+		sta	@getchr+1
+		sty	@getchr+2
+		txa
+		pha
+@getchr		lda	$2000		;Address modified.		
+		beq	@exit
+		jsr	rtcout
+		inc	@getchr+1
+		bne	@getchr
+		inc	@getchr+2
+		bne	@getchr		;Always.
+@exit		pla
+		tax
+		rts
+		endp
+
+***
+***
+***
+
+		export	signed
+signed		proc
+		sec
+		ror	sign
+		rts
+		endp
+
+***
+
+		export	unsigned
+unsigned		proc
+		lsr	sign
+		rts
+		endp
+
+***
+
+		export	chngsgn
+chngsgn		proc
+		lda	vsl,x
+		eor	#$FF
+		clc
+		adc	#1
+		sta	vsl,x
+		lda	vsh,x
+		eor	#$FF
+		adc	#0
+		sta	vsh,x
+		rts
+		endp
+
+***
+
+		export	decoutl
+decoutl		proc
+		import	decout
+		ldy	#0
+		jmp	decout		;jmp, instead of beq so we can be a lib.
+		endp
+
+***
+
+		export	vdecout
+vdecout		proc
+		export	decout
+		lda	vsh,x
+		tay
+		lda	vsl,x
+
+decout		sta	@templ
+		sty	@temph
+		lda	#'0'
+		sta	@temp2
+		txa
+		pha
+		bit	sign
+		bpl	@pos
+		tya
+		bpl	@pos
+		lda	#'-'
+		jsr	rtcout
+		lda	@templ
+		eor	#$FF
+		clc
+		adc	#1
+		sta	@templ
+		lda	@temph
+		eor	#$FF
+		adc	#0
+		sta	@temph
+@pos		ldx	#4
+@a		lda	#'0'
+		sta	@temp
+@b		lda	@templ
+		sec
+		sbc	@decl,x
+		tay
+		lda	@temph
+		sbc	@dech,x
+		bcc	@c
+		sta	@temph
+		sty	@templ
+		inc	@temp
+		bcs	@b
+@c		lda	@temp
+		dex
+		bmi	@e		;Last digit -- print no matter what.
+		cmp	@temp2
+		beq	@a		;Don't print leading 0's.
+		lsr	@temp2		;Inval leading 0 test.
+		jsr	rtcout
+		jmp	@a
+@e		jsr	rtcout
+		pla
+		tax
+		rts
+@decl		dc.b	1
+		dc.b	10
+		dc.b	100
+		dc.b	1000-768
+		dc.b	10000-9984
+@dech		dc.b	1>>8
+		dc.b	10>>8
+		dc.b	100>>8
+		dc.b	1000>>8
+		dc.b	10000>>8
+@templ		dc.b	0
+@temph		dc.b	0
+@temp		dc.b	0
+@temp2		dc.b	0
+		endp
+
+***
+
+		export	hexpad
+hexpad		proc
+		sta	hexpadchr
+		lsr	padhex
+		rts
+		endp
+
+***
+
+		export	hexnopad
+hexnopad		proc
+		sec
+		ror	padhex
+		rts
+		endp
+
+***
+
+		export	hexoutl
+hexoutl		proc
+		import	hexout
+		ldy	#0
+		clc
+		jmp	hexout+1		;jmp, instead of beq so we can be a lib.
+		endp
+
+***
+
+		export	vhexout
+vhexout		proc
+		export	hexout
+		import	hexpadchr
+		lda	vsh,x
+		tay
+		lda	vsl,x
+
+hexout		sec
+		sta	@templ
+		txa
+		pha
+		ldx	#3
+		bcs	@aa
+		ldx	#1
+		ldy	@templ
+@aa		sty	@temph
+		lda	padhex
+		sta	@padhex
+		lda	hexpadchr
+		sta	@hexpadchr
+@loop		lda	#0
+		ldy	#4
+@a		asl	@templ
+		rol	@temph
+		rol	a
+		dey
+		bne	@a
+		tay
+		bne	@b
+		lda	@padhex
+		bmi	@nopad
+		lda	@hexpadchr
+		jsr	rtcout
+		jmp	@nopad
+@b		jsr	@doone
+		lsr	@padhex
+		lda	#'0'
+		sta	@hexpadchr
+@nopad		dex
+		bne	@loop
+		lda	@temph
+		lsr	a
+		lsr	a
+		lsr	a
+		lsr	a
+		tay
+		pla
+		tax
+@doone		lda	@hexdigit,y
+		jmp	rtcout
+@hexdigit	dc.b	'0123456789ABCDEF'
+@padhex		dc.b	0
+@hexpadchr	dc.b	0
+@templ		dc.b	0
+@temph		dc.b	0
+		endp
+
+***
+
+		export	ldyvar
+ldyvar		proc
+		lda	vsl,y
+		pha
+		lda	vsh,y
+		tay
+		pla
+		rts
+		endp
+
+***
+
+		export	mulconl
+mulconl		proc
+		import	mulcon
+		ldy	#0
+		jmp	mulcon		;jmp, instead of beq so we can be a lib.
+		endp
+
+***
+
+		export	mulvar
+mulvar		proc
+		export	mulcon, mulvall, mulvalh
+		import	multiply, setcon
+		jsr	ldyvar
+
+mulcon		pha
+		lda	vsl,x
+		sta	mulvall
+		lda	vsh,x
+		sta	mulvalh
+		pla
+		jsr	multiply
+		jmp	setcon
+mulvall		dc.b	0
+mulvalh		dc.b	0
+		endp
+
+		export	multiply
+multiply		proc
+		sta	@templ
+		sty	@temph
+		lda	#0
+		tay
+@a		lsr	mulvalh
+		ror	mulvall
+		bcc	@b
+		clc
+		adc	@templ
+		pha
+		tya
+		adc	@temph
+		tay
+		pla
+@b		asl	@templ
+		rol	@temph
+		pha
+		lda	mulvalh
+		ora	mulvall
+		cmp	#1
+		pla
+		bcs	@a
+		rts
+@templ		dc.b	0
+@temph		dc.b	0
+		endp
+
+		export	divconl
+divconl		proc
+		import	divcon
+		ldy	#0
+		jmp	divcon		;jmp, instead of beq so we can be a lib.
+		endp
+
+***
+
+		export	divvar
+divvar		proc
+		export	divcon
+		import	ldyvar
+		jsr	ldyvar
+
+divcon		sta	@templ
+		sty	@temph
+		lda	#16
+		sta	@temp
+		lda	#0
+		sta	@temp2
+		sta	@temp3
+@a		asl	vsl,x
+		rol	vsh,x
+		rol	@temp2
+		rol	@temp3
+		lda	@temp2
+		sec
+		sbc	@templ
+		sta	@temp4
+		lda	@temp3
+		sbc	@temph
+		bcc	@b
+		sta	@temp3
+		lda	@temp4
+		sta	@temp2
+		inc	vsl,x
+@b		dec	@temp
+		bne	@a
+		lda	@temp2
+		ldy	@temp3
+		rts
+@templ		dc.b	0
+@temph		dc.b	0
+@temp		dc.b	0
+@temp2		dc.b	0
+@temp3		dc.b	0
+@temp4		dc.b	0
+		endp
+
+***
+
+		export	addvar
+addvar		proc
+		export	addcon
+		import	ldyvar
+		jsr	ldyvar
+
+addcon		pha
+		clc
+		adc	vsl,x
+		sta	vsl,x
+		tya
+		adc	vsh,x
+		sta	vsh,x
+		pla
+		rts
+		endp
+
+***
+
+		export	addconl
+addconl		proc
+		ldy	#0
+		jmp	addcon		;jmp, instead of beq so we can be a lib.
+		endp
+
+***
+
+		export	subvar
+subvar		proc
+		export	subcon
+		import	ldyvar
+		jsr	ldyvar
+
+subcon		pha
+		sta	@temp
+		lda	vsl,x
+		sec
+		sbc	@temp
+		sta	vsl,x
+		sty	@temp
+		lda	vsh,x
+		sbc	@temp
+		sta	vsh,x
+		pla
+		rts
+@temp		dc.b	0
+		endp
+
+***
+
+		export	subconl
+subconl		proc
+		ldy	#0
+		jmp	subcon		;jmp, instead of beq so we can be a lib.
+		endp
+
+***
+
+		export	setconl
+setconl		proc
+		export	setcon
+		ldy	#0
+
+setcon		sta	vsl,x
+		pha
+		tya
+		sta	vsh,x
+		pla
+		rts
+		endp
+
+***
+
+		export	setzero
+setzero		proc
+		lda	#0
+		sta	vsh,x
+		sta	vsl,x
+		rts
+		endp
+
+***
+
+		export	seteq
+seteq		proc
+		lda	vsh,y
+		sta	vsh,x
+		lda	vsl,y
+		sta	vsl,x
+		rts
+		endp
+
+***
+
+		export	setvars
+setvars		proc
+		pla
+		sta	@getval+1
+		pla
+		sta	@getval+2
+		txa
+		pha
+		ldy	#1
+@loop		jsr	@getval
+		cmp	#255
+		beq	@exit
+		tax
+		jsr	@getval
+		sta	vsl,x
+		jsr	@getval
+		sta	vsh,x
+		bcc	@loop		;Always.
+@exit		pla
+		tax
+		lda	@getval+2
+		pha
+		lda	@getval+1
+		pha
+		rts
+@getval		lda	$2000,y		;Address modified.
+		inc	@getval+1
+		bne	@rts
+		inc	@getval+2
+@rts		rts
+		endp
+
+***
+
+		export	xgty
+xgty		proc
+		import	vifequal, vifsgneq, xlty0
+		tya
+		pha
+		lda	sign
+		bpl	@a
+		jsr	vifsgneq
+		jmp	@b
+@a		jsr	vifequal
+@b		pla
+		tay
+		bcs	@rts
+		jmp	xlty0		;jmp, instead of bcc so we can be a lib.
+@rts		rts
+		endp
+
+***
+
+		export	xlty
+xlty		proc
+		export	xlty0
+		import	vifequal, vifsgneq
+		tya
+		pha
+		lda	sign
+		bpl	@a
+		jsr	vifsgneq
+		jmp	@b
+@a		jsr	vifequal
+@b		pla
+		tay
+		bcc	xltyrts
+xlty0		lda	vsl,x
+		pha
+		lda	vsl,y
+		sta	vsl,x
+		pla
+		sta	vsl,y
+		lda	vsh,x
+		pha
+		lda	vsh,y
+		sta	vsh,x
+		pla
+		sta	vsh,y
+xltyrts		rts
+		endp
+
+***
+
+		export	ifequal
+ifequal		proc
+		sta	@lo
+		sty	@hi
+		lda	vsh,x
+		cmp	@hi
+		bne	@exit
+		lda	vsl,x
+		cmp	@lo
+@exit		php
+		lda	@lo
+		plp
+		rts			;eq=eq, cs>=, cc<
+@lo		dc.b	0
+@hi		dc.b	0
+		endp
+
+***
+
+		export	vifequal
+vifequal		proc
+		lda	vsl,y		;Load up the variable value and go do it.
+		pha
+		lda	vsh,y
+		tay
+		pla
+		jmp	ifequal
+		endp
+
+***
+
+		export	ifsgneq
+ifsgneq		proc
+		sta	@lo		;Preserve acc.
+		tya
+		cmp	#$80		;See if right-side is negative.
+		eor	vsh,x		;See if signs are the same.
+		bmi	@exit		;xreg variable is smaller (signed).
+		bcs	@a		;xreg variable is negative.
+		jmp	ifequal		;xreg variable is positive.
+@a		jsr	ifequal
+		beq	@rts		;xreg variable is equal.
+		ror	a
+		eor	#$80
+		sec			;not equal status.
+		rol	a
+@exit		php
+		lda	@lo
+		plp
+@rts		rts			;eq=eq, cs>=, cc<
+@lo		dc.b	0
+		endp
+
+***
+
+		export	vifsgneq
+vifsgneq		proc
+		lda	vsl,y		;Load up the variable value and go do it.
+		pha
+		lda	vsh,y
+		tay
+		pla
+		jmp	ifsgneq
+		endp
+
+***
+
+		export	seedrandom
+seedrandom	proc
+		export	randomval
+		adc	$C02E		;Video counter.
+		pha
+		tya
+		adc	$C02E
+		tay
+		bne	@a
+		iny
+@a		pla
+		bne	@b
+		adc	#1
+@b		sta	randomval
+		sty	randomval+1
+		rts
+randomval	dc.w	0
+		endp
+
+***
+
+		export	calcrandom
+calcrandom	proc
+		stx	@keepx		;Keep this so we can restore the xreg.
+
+		tax			;Use 1 less than limit, so that we can
+		bne	@a		;compute the smallest mask possible.  This
+		dey			;way, if we are passed $100, we won't
+@a		dex			;compute a mask of $1FF.
+		stx	@rndlimit	;The carry was set by cmp #0, so the 
+		sty	@rndlimit+1	;sbc #1 is okay.
+
+* Figure a mask that is larger than or equal to the rndlimit (minus 1).  This will be
+* used against the calculated randomval before it is compared to the rndlimit.  If the
+* randomval is still too large, then we will get another.
+		ldx	#0
+		lda	@rndlimit+1
+		beq	@c		;No hi-byte, so work on low-byte.
+		txa
+		inx
+@c		sec
+		rol	a
+		cmp	@rndlimit,x
+		bcc	@c
+		sta	@maskl,x
+		txa
+		eor	#1
+		tax
+		sbc	#1		;Carry set.
+		sta	@maskl,x
+
+@recalc		ldy	#19
+@d		asl	randomval
+		rol	randomval+1
+		bcc	@e
+		lda	randomval
+		eor	#$87
+		sta	randomval
+		lda	randomval+1
+		eor	#$1D
+		sta	randomval+1
+@e		dey
+		bne	@d
+
+		ldy	randomval+1
+		ldx	randomval
+		bne	@f
+		dey
+@f		dex
+		tya
+		and	@maskh
+		tay
+		txa
+		and	@maskl
+		cpy	@rndlimit+1
+		bcc	@g
+		bne	@recalc
+		cmp	@rndlimit
+		bcc	@g
+		bne	@recalc
+@g		ldx	@keepx
+		rts
+@rndlimit	dc.w	0
+@keepx		dc.b	0
+@maskl		dc.b	0
+@maskh		dc.b	0
+		endp
+
+***
+***
+***
+
+		export	strval
+strval		proc
+		export	midstrval
+		import	strinfo, strsign, strlen, currentstr, nextchr
+		ldy	#0
+midstrval	jsr	strinfo
+		sta	@getchr+1
+		stx	@getchr+2
+		lda	#0
+		sta	strsign
+		sta	@temp
+		sta	@temp2
+		cpy	strlen
+		bcs	@exit		;Indexed out of string at start.
+		jsr	@getchr		;Decimal or hex...
+		cmp	#'$'
+		beq	@hex
+@a		cpy	strlen
+		bcs	@exit
+		jsr	@getchr
+		cmp	#'-'
+		bne	@b
+		lda	@temp
+		ora	@temp2
+		bne	@exit
+		inc	strsign		;Negative number.
+		iny
+		bcs	@a		;Always.
+@b		cmp	#'0'
+		bcc	@exit
+		cmp	#'9'+1
+		bcs	@exit
+		iny
+		sbc	#47		;cclear
+		pha
+		ldx	@temp2		;Multiply by 10.
+		lda	@temp
+		asl	a
+		rol	@temp2
+		asl	a
+		rol	@temp2
+		adc	@temp
+		sta	@temp
+		txa
+		adc	@temp2
+		asl	@temp
+		rol	a
+		sta	@temp2
+		pla
+		adc	@temp
+		sta	@temp
+		bcc	@a
+		inc	@temp2
+		bcs	@a		;Always.
+@exit		sty	nextchr		;Save next character location.
+		ldx	currentstr
+		lda	@temp		;Return value in acc,yreg.
+		ldy	@temp2
+		ror	strsign		;Should be negative.
+		bcc	@rts
+		eor	#$FF
+		adc	#0		;cset
+		pha
+		tya
+		eor	#$FF
+		adc	#0
+		tay
+		pla
+@rts		rts
+@getchr		lda	$2000,y		;Address modified.
+		rts
+@hex		iny
+		cpy	strlen
+		bcs	@exit
+		jsr	@getchr
+		cmp	#'0'
+		bcc	@exit
+		cmp	#'9'+1
+		bcc	@hexdigit
+		and	#$5F
+		cmp	#'A'
+		bcc	@exit
+		cmp	#'Z'+1
+		bcs	@exit
+		sbc	#6		;Carry clear.
+@hexdigit	asl	@temp
+		rol	@temp2
+		asl	@temp
+		rol	@temp2
+		asl	@temp
+		rol	@temp2
+		asl	@temp
+		rol	@temp2
+		and	#$0F
+		ora	@temp
+		sta	@temp
+		jmp	@hex
+@temp		dc.b	0
+@temp2		dc.b	0
+		endp
+
+***
+
+
+		export	strinfo
+strinfo		proc
+		export	currentstr, strlen, maxstrlen, numchrs
+		export	strsign, nextchr
+		import	strlens, maxstrlens, strlocs, numtocopy
+		stx	currentstr
+		lda	strlens,x	;String number in xreg.
+		sta	strlen
+		lda	maxstrlens,x
+		sta	maxstrlen
+		txa
+		asl	a
+		tax
+		bcs	@a
+		lda	strlocs,x
+		pha
+		lda	strlocs+1,x
+		tax
+		pla
+		rts
+@a		lda	strlocs+$100,x
+		pha
+		lda	strlocs+$101,x
+		tax
+		pla
+		rts
+currentstr	dc.b	0
+strlen		dc.b	0
+maxstrlen	dc.b	0
+numchrs		dc.b	0
+strsign		dc.b	0
+nextchr		dc.b	0
+		endp
+
+***
+
+		export	prstr
+prstr		proc
+		lda	#255		;xreg=str -- write entire string.
+		export	prleftstr, prmidstr
+
+prleftstr	ldy	#0		;xreg=str, acc=numChrs
+
+prmidstr		cmp	#0
+		beq	@exit
+		sta	numchrs		;xreg=str, acc=numChrs, yreg=starting chr.
+		jsr	strinfo
+		sta	@getchr+1
+		stx	@getchr+2
+@loop		cpy	strlen
+		bcs	@exit
+		tya
+		pha
+@getchr		lda	$2000,y		;Address modified.
+		jsr	rtcout
+		pla
+		tay
+		iny
+		dec	numchrs
+		bne	@loop
+@exit		ldx	currentstr
+		rts
+		endp
+
+***
+
+		export	leftstrcpy
+leftstrcpy	proc
+		export	strcpy, midstrcpy
+		import	numtocopy, copystr
+		sta	numtocopy	;Number to copy in acc.
+
+strcpy		lda	#0		;Copy entire string.
+
+midstrcpy	clc			;String offset in acc.
+		jmp	copystr		;jmp, instead of bcc so we can be a lib.
+		endp
+
+***
+
+		export	leftstrcat
+leftstrcat	proc
+		export	strcat, midstrcat, copystr
+		import	strlens, strlocs
+		sta	numtocopy	;Number to append in acc.
+
+strcat		lda	#0		;Append entire string.
+
+midstrcat	sec			;String offset in acc.
+
+copystr		pha			;Keep source offset.
+		php			;Keep copy or append status.
+		jsr	strinfo
+		sta	@dst+1
+		stx	@dst+2
+		lda	strlens,y
+		sta	@srcstrlen
+		tya
+		asl	a
+		tay
+		bcs	@a
+		lda	strlocs,y
+		sta	@src+1
+		lda	strlocs+1,y
+		sta	@src+2
+		bcc	@b
+@a		lda	strlocs+$100,y
+		sta	@src+1
+		lda	strlocs+$101,y
+		sta	@src+2
+@b		ldx	#0
+		plp			;Get copy or append status.
+		bcc	@c		;Copy status.
+		ldx	strlen		;Append status.
+@c		pla
+		tay			;Source offset.
+@loop		cpy	@srcstrlen
+		bcs	@exit
+		cpx	maxstrlen
+		bcs	@exit
+@src		lda	$2000,y		;Address modified.
+@dst		sta	$2000,x		;Address modified.
+		inx
+		iny
+		dec	numtocopy
+		bne	@loop
+@exit		lda	#255		;Set it back for next midstr operation.
+		sta	numtocopy	;The next one may only have 3 parameters.
+		txa			;xreg has destination string length.
+		ldx	currentstr
+		sta	strlens,x
+		rts
+@srcstrlen	dc.b	0
+		endp
+
+***
+
+		export	litstr
+litstr		proc
+		import	strlens
+		pla
+		sta	@getchr+1
+		pla
+		sta	@getchr+2
+		jsr	strinfo
+		sta	@putchr+1
+		stx	@putchr+2
+		ldy	#0
+@loop		inc	@getchr+1
+		bne	@getchr
+		inc	@getchr+2
+@getchr		lda	$2000		;Address modified.
+		beq	@exit
+		cpy	maxstrlen
+		bcs	@loop
+@putchr		sta	$2000,y
+		iny
+		bne	@loop
+@exit		lda	@getchr+2
+		pha
+		lda	@getchr+1
+		pha
+		ldx	currentstr
+		tya
+		sta	strlens,x
+		rts
+		endp
+
+***
+
+		export	strchr
+strchr		proc
+		tay
+		jsr	strinfo
+		sta	@getchr+1
+		stx	@getchr+2
+@getchr		lda	$2000,y
+		ldx	currentstr
+		rts
+		endp
+
+***
+
+		export	strloc
+strloc		proc
+		jsr	strinfo
+		pha
+		txa
+		tay
+		ldx	currentstr
+		pla
+		rts
+		endp
+
+***
+***
+***
+
+		export	restore
+restore		proc
+		import	getdatabyte
+		sta	getdatabyte+1
+		sty	getdatabyte+2
+		rts
+		endp
+
+***
+
+		export	getdatabyte
+getdatabyte	proc
+		lda	$2000
+		inc	getdatabyte+1
+		bne	@rts
+		inc	getdatabyte+2
+@rts		rts
+		endp
+
+***
+
+		export	readint
+readint		proc
+		jsr	getdatabyte
+		sta	vsl,x
+		pha
+		jsr	getdatabyte
+		sta	vsh,x
+		tay
+		pla
+		rts
+		endp
+
+***
+
+		export	readstr
+readstr		proc
+		import	strlens
+		jsr	strinfo
+		sta	@putchr+1
+		stx	@putchr+2
+		ldy	#0
+@loop		jsr	getdatabyte
+		cmp	readendchr
+		beq	@exit
+		cpy	maxstrlen
+		bcs	@loop
+@putchr		sta	$2000,y
+		iny
+		bne	@loop
+@exit		ldx	currentstr
+		tya
+		sta	strlens,x
+		rts
+		endp
+
+***
+
+		export	readend
+readend		proc
+		sta	readendchr
+		rts
+		endp
+
+***
+***
+***
+
+		export	arraybase
+arraybase	proc
+		export	arrayloc1, arrayloc2, arrayloc3
+		export	arrayloc0l, arrayloc0h
+		export	arrayloc1l, arrayloc1h
+		export	arrayloc2l, arrayloc2h
+		export	arrayloc3l, arrayloc3h
+		sta	arrayloc0l
+		sty	arrayloc0h
+arrayloc1	sta	arrayloc1l
+		sty	arrayloc1h
+arrayloc2	sta	arrayloc2l
+		sty	arrayloc2h
+arrayloc3	sta	arrayloc3l
+		sty	arrayloc3h
+		sta	aptr
+		sty	aptr+1
+		rts
+arrayloc0l	dc.b	0
+arrayloc0h	dc.b	0
+arrayloc1l	dc.b	0
+arrayloc1h	dc.b	0
+arrayloc2l	dc.b	0
+arrayloc2h	dc.b	0
+arrayloc3l	dc.b	0
+arrayloc3h	dc.b	0
+		endp
+
+***
+
+		export	dim1size
+dim1size		proc
+		export	dim2size, dim3size
+		export	dim1sizel, dim1sizeh
+		export	dim2sizel, dim2sizeh
+		export	dim3sizel, dim3sizeh
+		sta	dim1sizel
+		sty	dim1sizeh
+dim2size		sta	dim2sizel
+		sty	dim2sizeh
+dim3size		sta	dim3sizel
+		sty	dim3sizeh
+		rts
+dim1sizel	dc.b	0
+dim1sizeh	dc.b	0
+dim2sizel	dc.b	0
+dim2sizeh	dc.b	0
+dim3sizel	dc.b	0
+dim3sizeh	dc.b	0
+		endp
+
+***
+
+		export	varyindx1
+varyindx1	proc
+		export	arrayindx1
+		lda	vsl,y
+		pha
+		lda	vsh,y
+		tay
+		pla
+
+arrayindx1	sta	mulvall
+		sty	mulvalh
+		lda	dim1sizel
+		ldy	dim1sizeh
+		jsr	multiply
+		clc
+		adc	arrayloc0l
+		pha
+		tya
+		adc	arrayloc0h
+		tay
+		pla
+		jmp	arrayloc1
+		endp
+
+***
+
+		export	varyindx2
+varyindx2	proc
+		export	arrayindx2
+		lda	vsl,y
+		pha
+		lda	vsh,y
+		tay
+		pla
+
+arrayindx2	sta	mulvall
+		sty	mulvalh
+		lda	dim2sizel
+		ldy	dim2sizeh
+		jsr	multiply
+		clc
+		adc	arrayloc1l
+		pha
+		tya
+		adc	arrayloc1h
+		tay
+		pla
+		jmp	arrayloc2
+		endp
+
+***
+
+		export	varyindx3
+varyindx3	proc
+		export	arrayindx3
+		lda	vsl,y
+		pha
+		lda	vsh,y
+		tay
+		pla
+
+arrayindx3	sta	mulvall
+		sty	mulvalh
+		lda	dim3sizel
+		ldy	dim3sizeh
+		jsr	multiply
+		clc
+		adc	arrayloc2l
+		pha
+		tya
+		adc	arrayloc2h
+		tay
+		pla
+		jmp	arrayloc3
+		endp
+
+***
+
+		export	vgetelel
+vgetelel		proc
+		export	getelel, getnextelel
+		lda	vsl,y
+		pha
+		lda	vsh,y
+		tay
+		pla
+
+getelel		clc
+		adc	arrayloc3l
+		sta	aptr
+		tya
+		adc	arrayloc3h
+		sta	aptr+1
+getnextelel	ldy	#0
+		tya
+		sta	vsh,x
+		lda	(aptr),y
+		sta	vsl,x
+		inc	aptr
+		bne	@a
+		inc	aptr+1
+@a		rts
+		endp
+
+***
+
+		export	vgetele
+vgetele		proc
+		export	getele, getnextele
+		lda	vsl,y
+		pha
+		lda	vsh,y
+		tay
+		pla
+
+getele		asl	a
+		bcc	@a
+		iny
+@a		clc
+		adc	arrayloc3l
+		sta	aptr
+		tya
+		adc	arrayloc3h
+		sta	aptr+1
+getnextele	ldy	#0
+		lda	(aptr),y
+		sta	vsl,x
+		inc	aptr
+		bne	@b
+		inc	aptr+1
+@b		lda	(aptr),y
+		sta	vsh,x
+		inc	aptr
+		bne	@c
+		inc	aptr+1
+@c		tay
+		lda	vsl,x
+		rts
+		endp
+
+***
+
+		export	vputelel
+vputelel		proc
+		export	putelel, putnextelel
+		lda	vsl,y
+		pha
+		lda	vsh,y
+		tay
+		pla
+
+putelel		clc
+		adc	arrayloc3l
+		sta	aptr
+		tya
+		adc	arrayloc3h
+		sta	aptr+1
+putnextelel	lda	vsl,x
+		ldy	#0
+		sta	(aptr),y
+		inc	aptr
+		bne	@a
+		inc	aptr+1
+@a		rts
+		endp
+
+***
+
+		export	vputele
+vputele		proc
+		export	putele, putnextele
+		lda	vsl,y
+		pha
+		lda	vsh,y
+		tay
+		pla
+
+putele		asl	a
+		bcc	@a
+		iny
+@a		clc
+		adc	arrayloc3l
+		sta	aptr
+		tya
+		adc	arrayloc3h
+		sta	aptr+1
+putnextele	ldy	#0
+		lda	vsl,x
+		sta	(aptr),y
+		inc	aptr
+		bne	@b
+		inc	aptr+1
+@b		lda	vsh,x
+		sta	(aptr),y
+		inc	aptr
+		bne	@c
+		inc	aptr+1
+@c		tay
+		lda	vsl,x
+		rts
+		endp
+
+		end
