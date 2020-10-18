@@ -14,5 +14,5 @@ Objects = {ObjDir}sample.obj
 		-o {ObjDir}sample.lnk
 	makebiniigs {ObjDir}sample.lnk -o {ObjDir}sample.bin -org $800
 
-{ObjDir}sample.obj	Ä sys.equ sample.a
-	asmiigs sample.a -o {ObjDir}sample.obj
+{ObjDir}sample.obj	Ä sys.equ sample.aii
+	asmiigs sample.aii -o {ObjDir}sample.obj
